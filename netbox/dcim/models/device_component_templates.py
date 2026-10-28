@@ -1096,7 +1096,7 @@ class InventoryItemTemplate(LtreeModel, ComponentTemplateModel):
         parent = InventoryItem.objects.get(name=self.parent.name, **kwargs) if self.parent else None
         if self.component:
             model = self.component.component_model
-            component = model.objects.get(name=self.component.name, **kwargs)
+            component = model.objects.get(name=self.component.resolve_name(device=kwargs.get('device')), **kwargs)
         else:
             component = None
         return self.component_model(
