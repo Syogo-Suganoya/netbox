@@ -84,6 +84,27 @@ class ASNRangeTestCase(APIViewTestCases.APIViewTestCase):
             },
         ]
 
+    def test_asn_count(self):
+        """
+        Check that asn_count is included in both detail and list responses.
+        """
+        asnrange = ASNRange.objects.get(name='ASN Range 1')
+        ASN.objects.create(asn=101, rir=asnrange.rir)
+        ASN.objects.create(asn=102, rir=asnrange.rir)
+        self.add_permissions('ipam.view_asnrange')
+
+        url = reverse('ipam-api:asnrange-detail', kwargs={'pk': asnrange.pk})
+        response = self.client.get(url, **self.header)
+        self.assertHttpStatus(response, status.HTTP_200_OK)
+        self.assertEqual(response.data['asn_count'], 2)
+
+        url = reverse('ipam-api:asnrange-list')
+        response = self.client.get(url, **self.header)
+        self.assertHttpStatus(response, status.HTTP_200_OK)
+        asn_counts = {r['name']: r['asn_count'] for r in response.data['results']}
+        self.assertEqual(asn_counts['ASN Range 1'], 2)
+        self.assertEqual(asn_counts['ASN Range 2'], 0)
+
     def test_list_available_asns(self):
         """
         Test retrieval of all available ASNs within a parent range.
