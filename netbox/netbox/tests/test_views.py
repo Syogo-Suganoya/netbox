@@ -1,3 +1,4 @@
+import logging
 import urllib.parse
 from contextlib import contextmanager
 from unittest.mock import patch
@@ -10,7 +11,7 @@ from django.test import Client, TransactionTestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import DataFile, DataSource, ObjectChange
+from core.models import DataFile, DataSource, ObjectChange, ObjectType
 from dcim.choices import DeviceStatusChoices, InterfaceTypeChoices, SiteStatusChoices
 from dcim.models import Device, DeviceRole, DeviceType, Interface, Manufacturer, Site, VirtualChassis
 from extras.events import enqueue_event
@@ -22,7 +23,7 @@ from ipam.views import VLANGroupVLANsView
 from netbox.choices import CSVDelimiterChoices, ImportFormatChoices, ImportMethodChoices
 from netbox.constants import EMPTY_TABLE_TEXT
 from netbox.search.backends import search_backend
-from users.models import User
+from users.models import ObjectPermission, User
 from utilities.exceptions import AbortRequest
 from utilities.testing import TestCase
 from utilities.views import get_action_url
@@ -359,6 +360,51 @@ class MediaViewTestCase(TestCase):
         url = reverse('media', kwargs={'path': traversal_path})
         response = self.client.get(url)
         self.assertHttpStatus(response, 404)
+
+
+class ObjectImageAttachmentsViewTestCase(TestCase):
+
+    def setUp(self):
+        super().setUp()
+        # The attachments have no file on disk, so mute the FileNotFoundError tracebacks logged while
+        # rendering their thumbnails.
+        logger = logging.getLogger('sorl.thumbnail')
+        original_level = logger.level
+        logger.setLevel(logging.CRITICAL)
+        self.addCleanup(logger.setLevel, original_level)
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.site = Site.objects.create(name='Site 1', slug='site-1')
+        object_type = ContentType.objects.get_for_model(Site)
+        for name in ('allowed-image', 'secret-image'):
+            ImageAttachment.objects.create(
+                object_type=object_type,
+                object_id=cls.site.pk,
+                name=name,
+                image=f'image-attachments/{name}.jpg',
+                image_height=100,
+                image_width=100,
+            )
+
+    def test_image_attachments_with_constrained_permission(self):
+        self.add_permissions('dcim.view_site')
+        obj_perm = ObjectPermission(
+            name='Test permission',
+            constraints={'name': 'allowed-image'},
+            actions=['view']
+        )
+        obj_perm.save()
+        obj_perm.users.add(self.user)
+        obj_perm.object_types.add(ObjectType.objects.get_for_model(ImageAttachment))
+
+        url = get_action_url(self.site, 'image-attachments', kwargs={'pk': self.site.pk})
+        response = self.client.get(url)
+        self.assertHttpStatus(response, 200)
+        self.assertEqual(
+            [image.name for image in response.context['image_attachments']],
+            ['allowed-image'],
+        )
 
 
 class DeleteAtomicityMixin:
