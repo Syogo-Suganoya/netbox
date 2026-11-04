@@ -361,6 +361,32 @@ class MediaViewTestCase(TestCase):
         self.assertHttpStatus(response, 404)
 
 
+class ObjectDeleteViewReturnURLTestCase(TestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.add_permissions('dcim.view_site', 'dcim.delete_site')
+        self.site = Site.objects.create(name='Site 1', slug='site-1')
+        self.url = reverse('dcim:site_delete', kwargs={'pk': self.site.pk})
+
+    def test_delete_with_local_return_url(self):
+        return_url = reverse('dcim:region_list')
+        response = self.client.post(self.url, {'confirm': True, 'return_url': return_url})
+        self.assertHttpStatus(response, 302)
+        self.assertEqual(response['Location'], return_url)
+        self.assertFalse(Site.objects.filter(pk=self.site.pk).exists())
+
+    def test_delete_with_unsafe_return_url(self):
+        for i, return_url in enumerate(('//example.com', '/\\example.com', 'https://example.com'), start=2):
+            with self.subTest(return_url=return_url):
+                site = Site.objects.create(name=f'Site {i}', slug=f'site-{i}')
+                url = reverse('dcim:site_delete', kwargs={'pk': site.pk})
+                response = self.client.post(url, {'confirm': True, 'return_url': return_url})
+                self.assertHttpStatus(response, 302)
+                self.assertEqual(response['Location'], reverse('dcim:site_list'))
+                self.assertFalse(Site.objects.filter(pk=site.pk).exists())
+
+
 class DeleteAtomicityMixin:
     """
     Scenario shared by the transactional and autocommit variants of the ObjectDeleteView
