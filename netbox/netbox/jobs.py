@@ -344,6 +344,25 @@ class AsyncAPIJob(JobRunner):
         request.id = getattr(request_copy, 'id', None)
         return request
 
+    @staticmethod
+    def _brief_result(viewset, data):
+        """
+        Reduce each serialized object in a successful result to the serializer's brief fields. The
+        client can fetch the full representation from the model's endpoint, where view permissions
+        apply.
+        """
+        serializer_class = viewset.get_serializer_class()
+        brief_fields = getattr(serializer_class.Meta, 'brief_fields', None) or ('id', 'url', 'display')
+
+        def reduce(obj):
+            if isinstance(obj, dict):
+                return {name: value for name, value in obj.items() if name in brief_fields}
+            return obj
+
+        if isinstance(data, list):
+            return [reduce(obj) for obj in data]
+        return reduce(data)
+
     def run(
         self, viewset_class, action, payload, user_pk, request,
         action_kwargs=None, scheme='http', **kwargs
@@ -417,10 +436,16 @@ class AsyncAPIJob(JobRunner):
                     raise
 
         # Capture the action's result for the polling client, in the same shape for both
-        # success and failure.
+        # success and failure. On success only the brief representation of each object is kept:
+        # Job.data is readable by anyone with core.view_job, so it must not carry fields (e.g.
+        # secrets) that the model's own endpoint would hide. Errors are kept whole, as the client
+        # needs them to learn what was rejected.
+        data = response.data
+        if response.status_code < 400:
+            data = self._brief_result(viewset, data)
         self.job.data = {
             'status_code': response.status_code,
-            'data': response.data,
+            'data': data,
         }
 
         if response.status_code >= 400:

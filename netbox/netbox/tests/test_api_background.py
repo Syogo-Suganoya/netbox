@@ -22,6 +22,7 @@ from core.exceptions import JobFailed
 from core.models import Job, ObjectChange
 from dcim.api.views import RegionViewSet
 from dcim.models import DeviceType, Manufacturer, Region
+from extras.models import Webhook
 from netbox.jobs import AsyncAPIJob
 from netbox.registry import registry
 from users.models import ObjectPermission
@@ -541,6 +542,35 @@ class BackgroundBulkWriteTests(RQQueueTestMixin, APITestCase):
         self.assertEqual(job.status, JobStatusChoices.STATUS_COMPLETED)
         self.assertIn('description', job.data['data'][0])
         self.assertNotIn('created', job.data['data'][0])
+
+    def test_background_result_stores_brief_representation(self):
+        # Job.data is readable by any core.view_job holder, so a successful result must not carry the
+        # secret-bearing fields of the full representation (#23399).
+        perm = ObjectPermission.objects.create(name='Webhook permission', actions=['add', 'view'])
+        perm.users.add(self.user)
+        perm.object_types.add(ContentType.objects.get_for_model(Webhook))
+        payload = [
+            {
+                'name': f'Webhook {i}',
+                'payload_url': f'https://example.com/hook{i}/',
+                'secret': 'hmac-secret',
+                'additional_headers': 'Authorization: Bearer abc123',
+            }
+            for i in range(1, 3)
+        ]
+        response = self.client.post(
+            '/api/extras/webhooks/?background=true', payload, format='json', **self.header
+        )
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+
+        job = Job.objects.get(pk=response.data['job']['id'])
+        self.assertEqual(job.status, JobStatusChoices.STATUS_COMPLETED)
+        self.assertEqual(Webhook.objects.filter(secret='hmac-secret').count(), 2)
+        self.assertEqual(len(job.data['data']), 2)
+        for obj in job.data['data']:
+            self.assertEqual(set(obj), {'id', 'url', 'display', 'name', 'description'})
+        self.assertNotIn('hmac-secret', str(job.data))
+        self.assertNotIn('abc123', str(job.data))
 
     # ------------------------------------------------------------------ change logging
 
