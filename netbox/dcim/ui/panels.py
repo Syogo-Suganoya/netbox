@@ -623,6 +623,17 @@ class InterfaceConnectionPanel(panels.ObjectPanel):
     template_name = 'dcim/panels/interface_connection.html'
     title = _('Connection')
 
+    def get_context(self, context):
+        ctx = super().get_context(context)
+        obj = ctx['object']
+        # A channelized interface carries no path of its own: each channel subinterface traces its own path over the
+        # parent's cable, so show those paths instead.
+        if obj is not None and obj.channels and obj.cable:
+            ctx['channel_interfaces'] = obj.child_interfaces.restrict(ctx['request'].user, 'view').filter(
+                channel_id__isnull=False
+            ).order_by('channel_id')
+        return ctx
+
     def should_render(self, context):
         obj = context.get('object')
         return False if (obj is None or obj.is_virtual) else True

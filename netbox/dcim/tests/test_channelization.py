@@ -10,7 +10,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from core.choices import ObjectChangeActionChoices
-from core.models import ObjectChange
+from core.models import ObjectChange, ObjectType
 from dcim.choices import CableProfileChoices, InterfaceTypeChoices
 from dcim.exceptions import UnsupportedCablePath
 from dcim.filtersets import InterfaceFilterSet
@@ -33,7 +33,7 @@ from dcim.svg.cables import Connector
 from dcim.tests.utils import BaseCablePathTestCase
 from dcim.utils import create_cablepaths, object_to_path_node
 from users.constants import TOKEN_PREFIX
-from users.models import Token, User
+from users.models import ObjectPermission, Token, User
 from utilities.ordering import naturalize_interface
 from utilities.testing import TestCase as ViewTestCase
 
@@ -1673,3 +1673,93 @@ class ChannelizedBulkCreateTestCase(ViewTestCase):
         for i, template in enumerate(templates, start=1):
             self.assertEqual(template.name, f'et0:{i}')
             self.assertEqual(template.channel_id, i)
+
+
+class ChannelizedInterfaceConnectionPanelTestCase(ViewTestCase):
+    """
+    The Connection panel of a cabled channelized interface shows the path of each channel subinterface, since the
+    parent carries no path of its own (#23491).
+    """
+
+    def setUp(self):
+        super().setUp()
+        manufacturer = Manufacturer.objects.create(name='Generic', slug='generic')
+        device_type = DeviceType.objects.create(manufacturer=manufacturer, model='Test Device', slug='test-device')
+        role = DeviceRole.objects.create(name='Device Role', slug='device-role')
+        site = Site.objects.create(name='Site', slug='site')
+        self.device = Device.objects.create(site=site, device_type=device_type, role=role, name='Device 1')
+        self.peer_device = Device.objects.create(site=site, device_type=device_type, role=role, name='Device 2')
+
+        self.parent = Interface.objects.create(
+            device=self.device, name='et0', type=InterfaceTypeChoices.TYPE_40GE_QSFP_PLUS, channels=4
+        )
+        self.channels = [
+            Interface.objects.create(
+                device=self.device, name=f'et0:{i}', type=InterfaceTypeChoices.TYPE_CHANNEL,
+                parent=self.parent, channel_id=i,
+            ) for i in range(1, 5)
+        ]
+        self.peers = [
+            Interface.objects.create(
+                device=self.peer_device, name=f'xe{i}', type=InterfaceTypeChoices.TYPE_10GE_SFP_PLUS
+            ) for i in range(1, 5)
+        ]
+
+    def _connect(self):
+        cable = Cable(
+            profile=CableProfileChoices.BREAKOUT_1C4P_4C1P,
+            a_terminations=[self.parent],
+            b_terminations=self.peers,
+        )
+        cable.clean()
+        cable.save()
+        return cable
+
+    def _get_panel(self, interface):
+        response = self.client.get(interface.get_absolute_url())
+        self.assertHttpStatus(response, 200)
+        return response.content.decode()
+
+    def test_channelized_parent_lists_channel_paths(self):
+        self.add_permissions('dcim.view_interface', 'dcim.view_device', 'dcim.view_cable')
+        self._connect()
+
+        content = self._get_panel(self.parent)
+
+        # Each channel is listed with its own trace link and far endpoint, and the channels are all reachable
+        for channel, peer in zip(self.channels, self.peers):
+            self.assertIn(reverse('dcim:interface_trace', kwargs={'pk': channel.pk}), content)
+            self.assertIn(peer.get_absolute_url(), content)
+        self.assertNotIn('Not Reachable', content)
+        self.assertEqual(content.count('Reachable</span>'), 4)
+        # The parent's own (empty) trace is not offered
+        self.assertNotIn(reverse('dcim:interface_trace', kwargs={'pk': self.parent.pk}), content)
+
+    def test_channelized_parent_hides_channels_without_view_permission(self):
+        self.add_permissions('dcim.view_device', 'dcim.view_cable')
+        obj_perm = ObjectPermission(
+            name='View some interfaces', actions=['view'], constraints={'name__in': ['et0', 'et0:1']}
+        )
+        obj_perm.save()
+        obj_perm.users.add(self.user)
+        obj_perm.object_types.add(ObjectType.objects.get_for_model(Interface))
+        self._connect()
+
+        content = self._get_panel(self.parent)
+
+        self.assertIn(reverse('dcim:interface_trace', kwargs={'pk': self.channels[0].pk}), content)
+        for channel in self.channels[1:]:
+            self.assertNotIn(reverse('dcim:interface_trace', kwargs={'pk': channel.pk}), content)
+
+    def test_unchannelized_interface_shows_own_path(self):
+        self.add_permissions('dcim.view_interface', 'dcim.view_device', 'dcim.view_cable')
+        interface = Interface.objects.create(
+            device=self.device, name='et1', type=InterfaceTypeChoices.TYPE_10GE_SFP_PLUS
+        )
+        Cable(a_terminations=[interface], b_terminations=[self.peers[0]]).save()
+
+        content = self._get_panel(interface)
+
+        self.assertIn('Path status', content)
+        self.assertIn(self.peers[0].get_absolute_url(), content)
+        self.assertIn(reverse('dcim:interface_trace', kwargs={'pk': interface.pk}), content)
