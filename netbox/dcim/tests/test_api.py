@@ -3804,6 +3804,65 @@ class ModuleTestCase(APIViewTestCases.APIViewTestCase):
         response = self.client.post(url, data, format='json', **self.header)
         self.assertHttpStatus(response, status.HTTP_400_BAD_REQUEST)
 
+    def test_module_token_in_label_or_module_bay_template_unresolvable(self):
+        """
+        A MODULE_TOKEN placeholder that cannot be resolved should return a validation error when it
+        appears in a template's label or in a module bay template, as it does in a template's name.
+        """
+        self.add_permissions('dcim.add_module')
+        manufacturer = Manufacturer.objects.get(name='Generic')
+        device = create_test_device('Device for Token Label Test')
+
+        two_tokens = f'{MODULE_TOKEN}/{MODULE_TOKEN}'
+        interface = {'name': 'eth0', 'type': '1000base-t'}
+        # Two placeholders can't be resolved in a bay one level deep, nor any in a bay without a position
+        cases = (
+            (InterfaceTemplate, {**interface, 'label': two_tokens}, '1'),
+            (InterfaceTemplate, {**interface, 'label': f'Port {MODULE_TOKEN}'}, ''),
+            (ModuleBayTemplate, {'name': two_tokens}, '1'),
+            (ModuleBayTemplate, {'name': MODULE_TOKEN}, ''),
+        )
+        url = reverse('dcim-api:module-list')
+        for i, (template_model, template_attrs, position) in enumerate(cases, start=1):
+            with self.subTest(template=template_model.__name__, attrs=template_attrs, position=position):
+                module_bay = ModuleBay.objects.create(device=device, name=f'Bay {i}', position=position)
+                module_type = ModuleType.objects.create(manufacturer=manufacturer, model=f'Token Label Type {i}')
+                template_model.objects.create(module_type=module_type, **template_attrs)
+                data = {
+                    'device': device.pk,
+                    'module_bay': module_bay.pk,
+                    'module_type': module_type.pk,
+                }
+                response = self.client.post(url, data, format='json', **self.header)
+                self.assertHttpStatus(response, status.HTTP_400_BAD_REQUEST)
+                self.assertFalse(Module.objects.filter(module_type=module_type).exists())
+
+    def test_module_token_in_label_and_module_bay_template_resolved(self):
+        """
+        MODULE_TOKEN placeholders in a template's label and in a module bay template should resolve
+        to the position of the module bay the module is installed in.
+        """
+        self.add_permissions('dcim.add_module')
+        manufacturer = Manufacturer.objects.get(name='Generic')
+        device = create_test_device('Device for Token Label Resolved Test')
+        module_type = ModuleType.objects.create(manufacturer=manufacturer, model='Token Label Resolved Type')
+        InterfaceTemplate.objects.create(
+            module_type=module_type, name='eth0', label=f'Port {MODULE_TOKEN}', type='1000base-t'
+        )
+        ModuleBayTemplate.objects.create(module_type=module_type, name=f'Sub-bay {MODULE_TOKEN}')
+        module_bay = ModuleBay.objects.create(device=device, name='Bay 4', position='4')
+
+        url = reverse('dcim-api:module-list')
+        data = {
+            'device': device.pk,
+            'module_bay': module_bay.pk,
+            'module_type': module_type.pk,
+        }
+        response = self.client.post(url, data, format='json', **self.header)
+        self.assertHttpStatus(response, status.HTTP_201_CREATED)
+        self.assertEqual(device.interfaces.get(name='eth0').label, 'Port 4')
+        self.assertTrue(device.modulebays.filter(name='Sub-bay 4').exists())
+
     def test_list_objects_by_profile_id(self):
         profiles = ModuleTypeProfile.objects.filter(name__startswith='Test').order_by('name')
         self.add_permissions('dcim.view_module')

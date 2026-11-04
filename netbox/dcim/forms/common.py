@@ -5,7 +5,7 @@ from netaddr import EUI, AddrFormatError
 
 from dcim.choices import *
 from dcim.constants import *
-from dcim.utils import get_module_bay_positions, resolve_module_placeholder
+from dcim.utils import check_module_placeholders, get_module_bay_positions
 from netbox.context import current_request
 from utilities.exceptions import AbortRequest
 from utilities.forms import get_field_value
@@ -152,16 +152,7 @@ class ModuleCommonForm(forms.Form):
 
             # Get the templates for the module type.
             for template in getattr(module_type, templates).all():
-                resolved_name = template.name
-                if MODULE_TOKEN in template.name:
-                    if not module_bay.position:
-                        raise forms.ValidationError(
-                            _("Cannot install module with placeholder values in a module bay with no position defined.")
-                        )
-                    try:
-                        resolved_name = resolve_module_placeholder(template.name, positions)
-                    except ValueError as e:
-                        raise forms.ValidationError(str(e))
+                resolved_name = check_module_placeholders(template, module_bay, positions, forms.ValidationError)
 
                 existing_item = installed_components.get(resolved_name)
 
@@ -182,3 +173,7 @@ class ModuleCommonForm(forms.Form):
                             name=resolved_name
                         )
                     )
+
+        # Module bay templates are not checked for conflicts, but their placeholders must still resolve
+        for template in module_type.modulebaytemplates.all():
+            check_module_placeholders(template, module_bay, positions, forms.ValidationError)

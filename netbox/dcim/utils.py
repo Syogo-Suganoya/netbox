@@ -101,6 +101,27 @@ def resolve_module_placeholder(value, positions):
     )
 
 
+def check_module_placeholders(template, module_bay, positions, error):
+    """
+    Validate the {module} placeholders in a template's name and label for the module bay it is being installed in.
+    Raises `error` (a ValidationError class) if a placeholder cannot be resolved; otherwise returns the resolved name.
+    """
+    resolved = {}
+    for attr in ('name', 'label'):
+        value = getattr(template, attr)
+        if MODULE_TOKEN in value:
+            if not module_bay.position:
+                raise error(
+                    _("Cannot install module with placeholder values in a module bay with no position defined.")
+                )
+            try:
+                value = resolve_module_placeholder(value, positions)
+            except ValueError as e:
+                raise error(str(e))
+        resolved[attr] = value
+    return resolved['name']
+
+
 def compile_path_node(ct_id, object_id):
     return f'{ct_id}:{object_id}'
 
