@@ -46,6 +46,25 @@ class GetAvailablePrefixesMixin:
         child_prefixes = Prefix.objects.filter(**params).values_list('prefix', flat=True)
         return netaddr.IPSet(self.prefix) - netaddr.IPSet(child_prefixes)
 
+    # The number of child prefixes fetched per query when searching for the first available prefix
+    AVAILABLE_PREFIX_CHUNK_SIZE = 1000
+
+    def _iter_child_prefixes(self, queryset):
+        """
+        Yield the prefix of each object in the queryset in address order, fetching them in chunks. Plain sliced queries
+        are used rather than iterator(): a server-side cursor abandoned at the first gap is only closed when garbage
+        collected, which may be after its transaction has ended.
+        """
+        queryset = queryset.order_by('prefix', 'pk').values_list('prefix', flat=True)
+        chunk_size = self.AVAILABLE_PREFIX_CHUNK_SIZE
+        offset = 0
+        while True:
+            chunk = list(queryset[offset:offset + chunk_size])
+            yield from chunk
+            if len(chunk) < chunk_size:
+                return
+            offset += chunk_size
+
     def get_first_available_prefix(self):
         """
         Return the first available child prefix within the prefix (or None).
@@ -60,8 +79,7 @@ class GetAvailablePrefixesMixin:
         # child. Ordering by prefix sorts by network address (a containing prefix precedes the prefixes within it).
         parent = netaddr.IPNetwork(self.prefix)
         cursor = parent.first
-        child_prefixes = Prefix.objects.filter(**params).order_by('prefix').values_list('prefix', flat=True)
-        for child in child_prefixes.iterator():
+        for child in self._iter_child_prefixes(Prefix.objects.filter(**params)):
             if child.first > cursor:
                 last = child.first - 1
                 break

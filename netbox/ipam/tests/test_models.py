@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import netaddr
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
@@ -906,6 +908,19 @@ class PrefixTestCase(TestCase):
         # An aggregate counts children in every VRF
         aggregate = Aggregate.objects.create(prefix=IPNetwork('10.6.0.0/24'), rir=RIR.objects.create(name='RIR 1'))
         self.assertIsNone(aggregate.get_first_available_prefix())
+
+    def test_get_first_available_prefix_across_chunks(self):
+        """
+        The first available prefix is found when the child prefixes span several chunks.
+        """
+        parent = Prefix.objects.create(prefix=IPNetwork('10.7.0.0/16'))
+        Prefix.objects.bulk_create([Prefix(prefix=IPNetwork(f'10.7.{i}.0/24')) for i in range(7)])
+
+        with patch.object(Prefix, 'AVAILABLE_PREFIX_CHUNK_SIZE', 3):
+            self.assertEqual(parent.get_first_available_prefix(), IPNetwork('10.7.7.0/24'))
+            Prefix.objects.create(prefix=IPNetwork('10.7.8.0/21'))
+            Prefix.objects.create(prefix=IPNetwork('10.7.7.0/24'))
+            self.assertEqual(parent.get_first_available_prefix(), IPNetwork('10.7.16.0/20'))
 
     def test_get_first_available_ip(self):
 
