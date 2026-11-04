@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import netaddr
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
@@ -874,6 +876,51 @@ class PrefixTestCase(TestCase):
 
         Prefix.objects.create(prefix=IPNetwork('10.0.3.0/24'))
         self.assertEqual(prefixes[0].get_first_available_prefix(), IPNetwork('10.0.4.0/22'))
+
+    def test_get_first_available_prefix_matches_ipset(self):
+        """
+        The first available prefix found by walking the children in order matches the first CIDR of the full IPSet
+        of available space, including nested, duplicate, and VRF-scoped children (#23573).
+        """
+        vrf = VRF.objects.create(name='VRF 1')
+        cases = (
+            ('10.1.0.0/16', []),
+            ('10.2.0.0/16', ['10.2.0.0/17', '10.2.128.0/17']),
+            ('10.3.0.0/16', ['10.3.1.0/24', '10.3.2.0/24']),
+            ('10.4.0.0/16', ['10.4.0.0/17', '10.4.0.0/24', '10.4.0.0/17', '10.4.128.0/24']),
+            ('10.5.0.0/16', ['10.5.0.0/24', '10.5.0.0/25', '10.5.0.128/25', '10.5.1.0/24', '10.5.3.0/24']),
+            ('2001:db8::/32', ['2001:db8::/48', '2001:db8:1::/48', '2001:db8:3::/48']),
+        )
+        for parent_prefix, children in cases:
+            with self.subTest(parent=parent_prefix):
+                parent = Prefix.objects.create(prefix=IPNetwork(parent_prefix))
+                Prefix.objects.bulk_create([Prefix(prefix=IPNetwork(child)) for child in children])
+                available = parent.get_available_prefixes()
+                expected = available.iter_cidrs()[0] if available else None
+                self.assertEqual(parent.get_first_available_prefix(), expected)
+
+        # Children in another VRF do not occupy space in the parent's VRF
+        parent = Prefix.objects.create(prefix=IPNetwork('10.6.0.0/24'), vrf=vrf)
+        Prefix.objects.create(prefix=IPNetwork('10.6.0.0/25'))
+        Prefix.objects.create(prefix=IPNetwork('10.6.0.128/25'), vrf=vrf)
+        self.assertEqual(parent.get_first_available_prefix(), IPNetwork('10.6.0.0/25'))
+
+        # An aggregate counts children in every VRF
+        aggregate = Aggregate.objects.create(prefix=IPNetwork('10.6.0.0/24'), rir=RIR.objects.create(name='RIR 1'))
+        self.assertIsNone(aggregate.get_first_available_prefix())
+
+    def test_get_first_available_prefix_across_chunks(self):
+        """
+        The first available prefix is found when the child prefixes span several chunks.
+        """
+        parent = Prefix.objects.create(prefix=IPNetwork('10.7.0.0/16'))
+        Prefix.objects.bulk_create([Prefix(prefix=IPNetwork(f'10.7.{i}.0/24')) for i in range(7)])
+
+        with patch.object(Prefix, 'AVAILABLE_PREFIX_CHUNK_SIZE', 3):
+            self.assertEqual(parent.get_first_available_prefix(), IPNetwork('10.7.7.0/24'))
+            Prefix.objects.create(prefix=IPNetwork('10.7.8.0/21'))
+            Prefix.objects.create(prefix=IPNetwork('10.7.7.0/24'))
+            self.assertEqual(parent.get_first_available_prefix(), IPNetwork('10.7.16.0/20'))
 
     def test_get_first_available_ip(self):
 
