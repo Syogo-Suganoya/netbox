@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import netaddr
 from django.apps import apps
 from django.core.exceptions import ValidationError
-from django.db.models import BooleanField, F, Func, Q
+from django.db.models import BooleanField, F, Func, Q, QuerySet
 from django.utils.translation import gettext_lazy as _
 
 from .constants import *
@@ -56,6 +56,11 @@ def add_requested_prefixes(parent, prefix_list, show_available=True, show_assign
     :param show_available: Include available prefixes.
     :param show_assigned: Show assigned prefixes.
     """
+    # Without available prefixes there is nothing to interleave, so hand back the queryset for the table to paginate
+    # in the database rather than loading every child prefix. The ordering matches the stable sort below.
+    if show_assigned and not show_available and isinstance(prefix_list, QuerySet):
+        return prefix_list.order_by('prefix', F('vrf').asc(nulls_first=True), 'pk')
+
     child_prefixes = []
 
     # Add available prefixes to the table if requested

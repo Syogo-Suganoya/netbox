@@ -50,10 +50,30 @@ class GetAvailablePrefixesMixin:
         """
         Return the first available child prefix within the prefix (or None).
         """
-        available_prefixes = self.get_available_prefixes()
-        if not available_prefixes:
-            return None
-        return available_prefixes.iter_cidrs()[0]
+        params = {
+            'prefix__net_contained': str(self.prefix)
+        }
+        if hasattr(self, 'vrf'):
+            params['vrf'] = self.vrf
+
+        # Walk the child prefixes in address order and stop at the first gap, rather than building an IPSet of every
+        # child. Ordering by prefix sorts by network address (a containing prefix precedes the prefixes within it).
+        parent = netaddr.IPNetwork(self.prefix)
+        cursor = parent.first
+        child_prefixes = Prefix.objects.filter(**params).order_by('prefix').values_list('prefix', flat=True)
+        for child in child_prefixes.iterator():
+            if child.first > cursor:
+                last = child.first - 1
+                break
+            cursor = max(cursor, child.last + 1)
+            if cursor > parent.last:
+                return None
+        else:
+            last = parent.last
+
+        return netaddr.IPRange(
+            netaddr.IPAddress(cursor, parent.version), netaddr.IPAddress(last, parent.version)
+        ).cidrs()[0]
 
 
 class RIR(OrganizationalModel):

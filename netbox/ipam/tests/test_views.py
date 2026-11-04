@@ -2,6 +2,7 @@ import datetime
 from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
+from django.db import models
 from django.db.backends.postgresql.psycopg_any import NumericRange
 from django.test import RequestFactory, override_settings
 from django.urls import reverse
@@ -1419,6 +1420,34 @@ class PrefixTestCase(ViewTestCases.PrimaryObjectViewTestCase):
 
         self.assertHttpStatus(response, 200)
         self.assertIPAvailabilityShown(response, ip)
+
+    def test_prefix_prefixes_assigned_only_paginates_in_database(self):
+        """
+        With available prefixes hidden, the child prefixes are handed to the table as a queryset, so only the
+        requested page is loaded (#23573).
+        """
+        self.add_permissions('ipam.view_prefix')
+        # A global container includes the child prefixes of every VRF
+        parent = Prefix.objects.create(prefix=IPNetwork('198.51.106.0/24'), status=PrefixStatusChoices.STATUS_CONTAINER)
+        vrf = VRF.objects.create(name='Pagination VRF')
+        # Created out of order; enough rows that the paginator's orphan handling still splits them into pages
+        Prefix.objects.bulk_create([
+            Prefix(prefix=IPNetwork(f'198.51.106.{i * 32}/27')) for i in reversed(range(8))
+        ])
+        Prefix.objects.create(prefix=IPNetwork('198.51.106.0/27'), vrf=vrf)
+
+        url = reverse('ipam:prefix_prefixes', kwargs={'pk': parent.pk})
+        response = self.client.get(url, {'show_available': 'false', 'per_page': 2})
+
+        self.assertHttpStatus(response, 200)
+        table = response.context['table']
+        self.assertIsInstance(table.data.data, models.QuerySet)
+        # Same order as the sorted list: by prefix, then VRF (global first)
+        self.assertEqual(
+            [(str(row.record.prefix), row.record.vrf) for row in table.page.object_list],
+            [('198.51.106.0/27', None), ('198.51.106.0/27', vrf)],
+        )
+        self.assertEqual(table.page.paginator.count, 9)
 
     def test_prefix_prefixes_show_available_false_skips_filter_detection(self):
         """With availability already off, the filter detector never runs."""
