@@ -664,6 +664,46 @@ class ModuleFormTestCase(TestCase):
         intake.refresh_from_db()
         self.assertEqual(intake.module, module)
 
+    def test_module_form_rejects_unresolvable_token_in_label(self):
+        # Two placeholders in a label can't be resolved in a bay one level deep: this must be a
+        # form error rather than a ValueError raised while creating the components.
+        module_type = ModuleType.objects.create(
+            manufacturer=self.module_type.manufacturer, model='Label Token Form Type'
+        )
+        InterfaceTemplate.objects.create(
+            module_type=module_type, name='eth0', label='{module}/{module}', type=InterfaceTypeChoices.TYPE_1GE_FIXED
+        )
+        module_bay = ModuleBay.objects.create(device=self.device, name='Bay D', position='1')
+        form = ModuleForm(
+            data={
+                'device': self.device.pk,
+                'module_bay': module_bay.pk,
+                'module_type': module_type.pk,
+                'status': 'active',
+                'replicate_components': True,
+            },
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn('2 placeholders given', str(form.errors))
+
+    def test_module_form_rejects_token_in_module_bay_template_without_position(self):
+        # bay_b has no position, so a placeholder in a module bay template has nothing to resolve to.
+        module_type = ModuleType.objects.create(
+            manufacturer=self.module_type.manufacturer, model='Module Bay Token Form Type'
+        )
+        ModuleBayTemplate.objects.create(module_type=module_type, name='{module}')
+        form = ModuleForm(
+            data={
+                'device': self.device.pk,
+                'module_bay': self.bay_b.pk,
+                'module_type': module_type.pk,
+                'status': 'active',
+                'replicate_components': True,
+            },
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn('no position defined', str(form.errors))
+
 
 class VCPositionTokenFormTestCase(TestCase):
 
