@@ -715,6 +715,17 @@ class DynamicFilterLookupExpressionTestCase(TestCase):
         params = {'slug__iregex': ['^DEF-[a-z]*-2$']}
         self.assertEqual(SiteFilterSet(params, Site.objects.all()).qs.count(), 1)
 
+    def test_site_substring_lookups_null_value(self):
+        """
+        The null choice value must be matched as a literal string by lookups other than exact matches, which
+        cannot take None as a query value.
+        """
+        Site.objects.filter(name='Site 1').update(description='Not null')
+        for lookup, count in (('ic', 1), ('nic', 2), ('isw', 0), ('iew', 1), ('regex', 1)):
+            with self.subTest(lookup=lookup):
+                params = {f'description__{lookup}': ['null']}
+                self.assertEqual(SiteFilterSet(params, Site.objects.all()).qs.count(), count)
+
     def test_provider_asn_lt(self):
         params = {'asn__lt': [65101]}
         self.assertEqual(ASNFilterSet(params, ASN.objects.all()).qs.count(), 1)

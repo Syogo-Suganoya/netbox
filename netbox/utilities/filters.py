@@ -68,6 +68,13 @@ def multivalue_field_factory(field_class):
 class MultiValueCharFilter(django_filters.MultipleChoiceFilter):
     field_class = multivalue_field_factory(forms.CharField)
 
+    def get_filter_predicate(self, v):
+        # The null choice value is translated to None, but only exact lookups can match on None (as IS NULL).
+        # For any other lookup (e.g. icontains), match the null choice value as a literal string.
+        if v is None and self.lookup_expr not in ('exact', 'iexact'):
+            v = self.null_value
+        return super().get_filter_predicate(v)
+
 
 @extend_schema_field(OpenApiTypes.DATE)
 class MultiValueDateFilter(django_filters.MultipleChoiceFilter):
