@@ -147,7 +147,8 @@ class LoginView(View):
 
             return response
 
-        username = form['username'].value()
+        # The value is None when the field is missing from the request
+        username = form['username'].value() or ''
         logger.debug(f"Login form validation failed for username: {remove_linebreaks(username)}")
 
         return render(request, self.template_name, {

@@ -961,6 +961,19 @@ class ObjectPermissionProxyModelTestCase(TestCase):
             self.assertFalse(self.user.has_perm('extras.change_nosuchmodel', self.script_module))
 
 
+class LoginViewTestCase(DjangoTestCase):
+
+    def test_login_without_username_field(self):
+        """
+        A login request which omits the username field entirely must re-render the form with a
+        validation error, as it does for an empty username.
+        """
+        response = self.client.post(reverse('login'), {'password': 'x'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('username', response.context['form'].errors)
+
+
 class SSOLoginButtonTestCase(DjangoTestCase):
     """
     Verify that the SSO buttons on the login page initiate authentication via POST. The social auth
