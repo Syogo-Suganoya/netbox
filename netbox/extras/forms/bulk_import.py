@@ -435,9 +435,12 @@ class JournalEntryImportForm(NetBoxModelImportForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # If not creating a new JournalEntry, disable the created_by field
+        # If not creating a new JournalEntry, omit the created_by field (and ignore its column). A disabled field
+        # would still validate the current author against the field's queryset, which is restricted to the users the
+        # importer can view.
         if self.instance and not self.instance._state.adding:
-            self.fields['created_by'].disabled = True
+            del self.fields['created_by']
+            self.headers = {k: v for k, v in self.headers.items() if k != 'created_by'}
 
 
 class NotificationGroupImportForm(CSVModelForm):

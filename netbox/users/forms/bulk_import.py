@@ -52,10 +52,13 @@ class TokenImportForm(CSVModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # Disable the user field when updating an existing Token, so a Token's owner cannot be reassigned via
-        # bulk import (consistent with the REST API & UI edit form).
+        # Omit the user field (and ignore its column) when updating an existing Token, so a Token's owner cannot be
+        # reassigned via bulk import (consistent with the REST API & UI edit form). A disabled field would still
+        # validate the current owner against the field's queryset, which is restricted to the users the importer
+        # can view.
         if self.instance.pk:
-            self.fields['user'].disabled = True
+            del self.fields['user']
+            self.headers = {k: v for k, v in self.headers.items() if k != 'user'}
 
 
 class OwnerGroupImportForm(CSVModelForm):
