@@ -31,7 +31,7 @@ from utilities.forms.utils import (
     get_field_value,
     parse_numeric_range,
 )
-from utilities.forms.widgets.select import AvailableOptions, HTMXSelect, Select, SelectedOptions
+from utilities.forms.widgets.select import AvailableOptions, ColorSelect, HTMXSelect, Select, SelectedOptions
 
 
 class ExpandIPNetworkTestCase(TestCase):
@@ -633,6 +633,30 @@ class SelectMultipleWidgetTestCase(TestCase):
         self.assertEqual(widget.choices[0][1], [(2, 'Option 2')])
         self.assertEqual(widget.choices[1][0], 'Group B')
         self.assertEqual(widget.choices[1][1], [(3, 'Option 3')])
+
+
+class ColorSelectTestCase(TestCase):
+
+    def test_predefined_color_selected(self):
+        widget = ColorSelect()
+        html = widget.render('color', 'f44336')
+
+        self.assertInHTML('<option value="f44336" selected>Red</option>', html)
+        self.assertNotIn('<option value="f44336">f44336</option>', html)
+
+    def test_custom_color_selected(self):
+        """
+        A color which is not one of the predefined choices must be rendered as a selected option, labeled by its
+        value.
+        """
+        widget = ColorSelect()
+        html = widget.render('color', 'e20074')
+
+        self.assertInHTML('<option value="e20074" selected>e20074</option>', html)
+
+        # Rendering the widget again must not add a duplicate option
+        html = widget.render('color', 'e20074')
+        self.assertEqual(html.count('value="e20074"'), 1)
 
 
 class DynamicChoiceFieldTestCase(TestCase):

@@ -94,6 +94,15 @@ class ColorSelect(forms.Select):
         super().__init__(*args, **kwargs)
         self.attrs['class'] = 'color-select'
 
+    def optgroups(self, name, value, attrs=None):
+        # A color which is not one of the predefined choices (e.g. one set via import or the REST API) has no
+        # option to select, so the form would be submitted without it. Add an option for it, labeled by its value.
+        choice_values = {str(choice[0]) for choice in self.choices}
+        for v in value:
+            if v and v not in choice_values:
+                self.choices = [*self.choices, (v, v)]
+        return super().optgroups(name, value, attrs)
+
 
 class HTMXSelect(Select):
     """
