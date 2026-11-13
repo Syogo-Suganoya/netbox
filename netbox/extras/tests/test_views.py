@@ -1272,6 +1272,34 @@ class JournalEntryTestCase(
         }
 
 
+class JournalEntryBulkImportUpdateTestCase(TestCase):
+    user_permissions = (
+        'extras.add_journalentry', 'extras.change_journalentry', 'extras.view_journalentry', 'dcim.view_site',
+    )
+
+    def test_update_journal_entry_without_view_user_permission(self):
+        """
+        Updating a JournalEntry via bulk import must ignore the created_by column, even if the importer cannot view
+        the entry's author.
+        """
+        site = Site.objects.create(name='Site 1', slug='site-1')
+        author = User.objects.create(username='Author')
+        other = User.objects.create(username='Other User')
+        journal_entry = JournalEntry.objects.create(assigned_object=site, created_by=author, comments='Original')
+        data = {
+            'data': f'id,created_by,comments\n{journal_entry.pk},{other.pk},Updated',
+            'format': ImportFormatChoices.CSV,
+            'csv_delimiter': CSVDelimiterChoices.AUTO,
+        }
+
+        response = self.client.post(reverse('extras:journalentry_bulk_import'), data)
+
+        self.assertHttpStatus(response, 302)
+        journal_entry.refresh_from_db()
+        self.assertEqual(journal_entry.comments, 'Updated')
+        self.assertEqual(journal_entry.created_by, author)
+
+
 class SubscriptionTestCase(
     ViewTestCases.CreateObjectViewTestCase,
     ViewTestCases.DeleteObjectViewTestCase,
