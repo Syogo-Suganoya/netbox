@@ -320,6 +320,31 @@ class TokenEditOwnerTestCase(TestCase):
         self.assertNotContains(response, owner.username)
 
 
+class TokenBulkImportUpdateTestCase(TestCase):
+    user_permissions = ('users.add_token', 'users.change_token', 'users.view_token', 'users.grant_token')
+
+    def test_update_token_without_view_user_permission(self):
+        """
+        Updating a Token via bulk import must ignore the user column, even if the importer cannot view the Token's
+        owner.
+        """
+        owner = create_test_user('token_owner')
+        other = create_test_user('other_user')
+        token = Token.objects.create(user=owner, description='Original description')
+        data = {
+            'data': f'id,user,description\n{token.pk},{other.pk},Updated description',
+            'format': ImportFormatChoices.CSV,
+            'csv_delimiter': CSVDelimiterChoices.AUTO,
+        }
+
+        response = self.client.post(reverse('users:token_bulk_import'), data)
+
+        self.assertHttpStatus(response, 302)
+        token.refresh_from_db()
+        self.assertEqual(token.description, 'Updated description')
+        self.assertEqual(token.user, owner)
+
+
 class TokenOneTimeAuthStringTestCase(TestCase):
     """
     Verify that the plaintext value of a newly-created Token is surfaced exactly once via the detail view, and
