@@ -772,6 +772,17 @@ class ExportTemplateTestCase(TestCase, ChangeLoggedFilterSetTestMixin):
         params = {'object_type_id': [ObjectType.objects.get_for_model(Site).pk]}
         self.assertEqual(self.filterset(params, self.queryset).qs.count(), 1)
 
+    def test_object_type_negation(self):
+        params = {'object_type__n': ['dcim.site']}
+        self.assertEqual(self.filterset(params, self.queryset).qs.count(), 2)
+
+    def test_object_type_lookups(self):
+        # An object type is matched by its natural key, so only exact and negated matches are supported
+        filters = self.filterset.get_filters()
+        self.assertIn('object_type__n', filters)
+        for lookup in ('ic', 'nic', 'ie', 'nie', 'isw', 'nisw', 'iew', 'niew', 'regex', 'iregex'):
+            self.assertNotIn(f'object_type__{lookup}', filters)
+
     def test_description(self):
         params = {'description': ['foobar1', 'foobar2']}
         self.assertEqual(self.filterset(params, self.queryset).qs.count(), 2)
