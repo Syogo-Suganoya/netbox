@@ -65,6 +65,24 @@ SEARCH_TYPES = {
 }
 
 
+def supports_nested_serializer(model):
+    """
+    Return True if the REST API can represent instances of the given model as nested objects, as is done for the
+    values of object and multi-object custom fields.
+    """
+    # Imported locally to avoid circular imports
+    from netbox.api.exceptions import SerializerNotFound
+    from netbox.api.serializers import BaseModelSerializer
+    from utilities.api import get_serializer_for_model
+
+    if model is None:
+        return False
+    try:
+        return issubclass(get_serializer_for_model(model), BaseModelSerializer)
+    except SerializerNotFound:
+        return False
+
+
 class CustomFieldManager(models.Manager.from_queryset(RestrictedQuerySet)):
     use_in_migrations = True
 
@@ -805,6 +823,10 @@ class CustomField(CloningMixin, ExportTemplatesMixin, OwnerMixin, ChangeLoggedMo
             if not self.related_object_type:
                 raise ValidationError({
                     'related_object_type': _("Object fields must define an object type.")
+                })
+            if not supports_nested_serializer(self.related_object_type.model_class()):
+                raise ValidationError({
+                    'related_object_type': _("Object fields may reference only object types available in the REST API.")
                 })
         elif self.related_object_type:
             raise ValidationError({

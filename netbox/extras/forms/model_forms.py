@@ -12,6 +12,7 @@ from dcim.models import DeviceRole, DeviceType, Location, Platform, Region, Site
 from extras.choices import *
 from extras.constants import IMAGE_ATTACHMENT_IMAGE_FORMATS
 from extras.models import *
+from extras.models.customfields import supports_nested_serializer
 from netbox.event_rules import get_event_rule_action, get_event_rule_action_choices
 from netbox.events import get_event_type_choices
 from netbox.forms import NetBoxModelForm, PrimaryModelForm
@@ -198,6 +199,11 @@ class CustomFieldForm(ChangelogMessageMixin, OwnerMixin, forms.ModelForm):
                 FieldSet('related_object_type', 'related_object_filter', name=_('Related Object')),
                 *self.fieldsets[1:]
             )
+            # Offer only object types which the REST API can represent as custom field values
+            self.fields['related_object_type'].queryset = ObjectType.objects.filter(pk__in=[
+                object_type.pk for object_type in ObjectType.objects.public()
+                if supports_nested_serializer(object_type.model_class())
+            ])
         else:
             del self.fields['related_object_type']
             del self.fields['related_object_filter']
