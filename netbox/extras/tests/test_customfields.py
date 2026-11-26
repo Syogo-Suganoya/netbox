@@ -17,7 +17,7 @@ from django.urls import reverse
 from rest_framework import status
 
 from core.choices import ObjectChangeActionChoices
-from core.models import Job, ObjectChange, ObjectType
+from core.models import ConfigRevision, Job, ObjectChange, ObjectType
 from dcim.choices import InterfaceTypeChoices
 from dcim.filtersets import SiteFilterSet
 from dcim.forms import SiteImportForm
@@ -33,7 +33,7 @@ from extras.jobs import (
     provision_custom_field,
     purge_custom_field,
 )
-from extras.models import CustomField, CustomFieldChoiceSet, ImageAttachment, JournalEntry, Tag
+from extras.models import CustomField, CustomFieldChoiceSet, Dashboard, ImageAttachment, JournalEntry, Tag
 from ipam.api.serializers import VLANSerializer
 from ipam.models import VLAN, Service, ServiceTemplate
 from netbox.choices import CSVDelimiterChoices, ImportFormatChoices
@@ -77,6 +77,25 @@ class CustomFieldTestCase(TestCase):
         with self.assertRaises(ValidationError):
             # Double underscores not permitted
             CustomField(name='foo__bar', type=CustomFieldTypeChoices.TYPE_TEXT).full_clean()
+
+    def test_related_object_type_requires_rest_api_serializer(self):
+        """
+        Object fields may reference only object types which the REST API can represent as nested objects.
+        """
+        for model in (ConfigRevision, Dashboard):
+            with self.subTest(model=model._meta.label), self.assertRaises(ValidationError) as cm:
+                CustomField(
+                    name='object_field',
+                    type=CustomFieldTypeChoices.TYPE_OBJECT,
+                    related_object_type=ObjectType.objects.get_for_model(model),
+                ).full_clean()
+            self.assertIn('related_object_type', cm.exception.message_dict)
+
+        CustomField(
+            name='object_field',
+            type=CustomFieldTypeChoices.TYPE_OBJECT,
+            related_object_type=ObjectType.objects.get_for_model(Site),
+        ).full_clean()
 
     def test_text_field(self):
         value = 'Foobar!'

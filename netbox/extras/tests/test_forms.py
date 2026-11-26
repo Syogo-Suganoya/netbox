@@ -7,7 +7,7 @@ from django.test import TestCase
 
 from core.choices import ManagedFileRootPathChoices
 from core.events import OBJECT_CREATED
-from core.models import DataSource, ObjectType
+from core.models import ConfigRevision, DataSource, ObjectType
 from dcim.forms import SiteForm
 from dcim.forms.filtersets import PowerOutletFilterForm
 from dcim.models import Site
@@ -16,11 +16,12 @@ from extras.forms import SavedFilterForm, TableConfigBulkEditForm, TableConfigFo
 from extras.forms.bulk_edit import EventRuleBulkEditForm
 from extras.forms.bulk_import import EventRuleImportForm
 from extras.forms.filtersets import EventRuleFilterForm
-from extras.forms.model_forms import CustomFieldChoiceSetForm, EventRuleForm, TagForm
+from extras.forms.model_forms import CustomFieldChoiceSetForm, CustomFieldForm, EventRuleForm, TagForm
 from extras.forms.scripts import ScriptFileForm
 from extras.models import (
     CustomField,
     CustomFieldChoiceSet,
+    Dashboard,
     EventRule,
     NotificationGroup,
     Script,
@@ -114,6 +115,17 @@ class CustomFieldModelFormTestCase(TestCase):
         for field_type, _ in CustomFieldTypeChoices.CHOICES:
             self.assertIn(field_type, instance.custom_field_data)
             self.assertIsNone(instance.custom_field_data[field_type])
+
+
+class CustomFieldFormTestCase(TestCase):
+
+    def test_related_object_types_exclude_models_without_rest_api_serializer(self):
+        form = CustomFieldForm(initial={'type': CustomFieldTypeChoices.TYPE_OBJECT})
+        queryset = form.fields['related_object_type'].queryset
+
+        self.assertIn(ObjectType.objects.get_for_model(Site), queryset)
+        for model in (ConfigRevision, Dashboard):
+            self.assertNotIn(ObjectType.objects.get_for_model(model), queryset)
 
 
 class CustomFieldChoiceSetFormTestCase(TestCase):
