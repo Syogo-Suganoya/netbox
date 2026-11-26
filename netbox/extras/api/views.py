@@ -191,7 +191,7 @@ class TagViewSet(NetBoxModelViewSet):
 class TaggedItemViewSet(RetrieveModelMixin, ListModelMixin, BaseViewSet):
     queryset = TaggedItem.objects.prefetch_related(
         'content_type', 'content_object', 'tag'
-    ).order_by('tag__weight', 'tag__name')
+    ).order_by('tag__weight', 'tag__name', 'pk')
     serializer_class = serializers.TaggedItemSerializer
     filterset_class = filtersets.TaggedItemFilterSet
 
